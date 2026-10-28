@@ -58,3 +58,18 @@ def generate_answer(messages):
         model=MODEL, messages=messages, temperature=0.2, max_tokens=1000
     )
     return clean(response.choices[0].message.content)
+
+def stream_answer(messages):
+    """Yield the answer piece by piece as the model produces it."""
+    stream = get_client().chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        temperature=0.2,
+        max_tokens=1000,
+        stream=True,
+    )
+    for event in stream:
+        if event.choices:
+            delta = event.choices[0].delta.content
+            if delta:
+                yield delta

@@ -1,9 +1,11 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app import llm
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import Conversation, Document, Message
 from app.retrieval import retrieve
 
@@ -104,3 +106,70 @@ def send_message(
     db.commit()
     db.refresh(reply)
     return msg_dict(reply)
+
+
+def sse(payload: dict) -> str:
+    """Format one Server-Sent Event."""
+    return f"data: {json.dumps(payload, default=str)}\n\n"
+
+
+@router.post("/{conversation_id}/messages/stream")
+def stream_message(
+    conversation_id: int, body: MessageCreate, db: Session = Depends(get_db)
+):
+    conv = get_conversation(db, conversation_id)
+    question = body.content.strip()
+
+    history = [
+        {"role": m.role, "content": m.content}
+        for m in conv.messages[-llm.HISTORY_LIMIT:]
+    ]
+    conv_id = conv.id
+    has_doc = conv.document_id is not None
+    needs_title = conv.title == "New chat"
+    hits = retrieve(db, question, document_id=conv.document_id) if has_doc else []
+    messages = llm.build_messages(question, history, hits, has_doc)
+
+    def event_stream():
+        # All database reads happened above. The generator opens its own
+        # session to save, because the request's session may be closed by then.
+        yield sse({"type": "sources", "sources": hits})
+
+        if has_doc and not hits:
+            answer = llm.NOT_FOUND  # nothing relevant found: skip the model call
+            yield sse({"type": "token", "text": answer})
+        else:
+            parts = []
+            try:
+                for piece in llm.stream_answer(messages):
+                    parts.append(piece)
+                    yield sse({"type": "token", "text": piece})
+            except Exception as e:
+                yield sse({"type": "error", "detail": f"Language model error: {e}"})
+                return
+            answer = llm.clean("".join(parts)) or "Sorry, I couldn't generate an answer."
+
+        with SessionLocal() as session:
+            if needs_title:
+                conversation = session.get(Conversation, conv_id)
+                if conversation is not None and conversation.title == "New chat":
+                    conversation.title = question[:60]
+            session.add(Message(conversation_id=conv_id, role="user", content=question))
+            reply = Message(
+                conversation_id=conv_id,
+                role="assistant",
+                content=answer,
+                sources=hits or None,
+            )
+            session.add(reply)
+            session.commit()
+            session.refresh(reply)
+            message_id = reply.id
+
+        yield sse({"type": "done", "message_id": message_id})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
