@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.routers import documents
+from app.routers import documents, search
 
 app = FastAPI(title="KnowBase AI API")
 
@@ -16,6 +16,7 @@ app.add_middleware(
 )
 
 app.include_router(documents.router)
+app.include_router(search.router)
 
 @app.get("/")
 def root():
