@@ -125,3 +125,32 @@ export async function streamMessage(
     }
   }
 }
+
+export interface ApiMessage {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  sources: Source[];
+  created_at: string;
+}
+
+export interface ConversationDetail extends Conversation {
+  messages: ApiMessage[];
+}
+
+export const uploadDocument = (file: File) => {
+  const form = new FormData();
+  form.append("file", file);
+  return request<DocumentInfo>("/documents", { method: "POST", body: form });
+};
+
+export const deleteDocument = (id: number) =>
+  request<null>(`/documents/${id}`, { method: "DELETE" });
+
+export const listConversations = () => request<Conversation[]>("/conversations");
+
+export const getConversation = (id: number) =>
+  request<ConversationDetail>(`/conversations/${id}`);
+
+export const deleteConversation = (id: number) =>
+  request<null>(`/conversations/${id}`, { method: "DELETE" });
