@@ -1,3 +1,5 @@
+import os
+
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -7,10 +9,17 @@ from app.routers import documents, search, chat
 
 app = FastAPI(title="KnowBase AI API")
 
-# Allow the React dev server to call this API from the browser
+origins = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+    ).split(",")
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
